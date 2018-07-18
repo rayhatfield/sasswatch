@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 'use strict';
-const {join} = require('path');
+const {join, normalize, basename} = require('path');
 const fs = require('fs');
 const glob = require('glob');
 const prompt = require('prompt-async');
@@ -13,6 +13,7 @@ const pattern = /\.scss$/i;
 
 const watchDir = process.argv[2];
 const outputFile = process.argv[3];
+const cssOutputFile = process.argv[4];
 let sourceFiles;
 
 function isDir (dir) {
@@ -58,7 +59,7 @@ async function go () {
 		}
 	}
 
-	sourceFiles = new Set(glob.sync('*.scss', {matchBase: true, cwd: watchDir}));
+	sourceFiles = new Set(glob.sync('*.scss', {matchBase: true, cwd: watchDir, ignore: basename(outputFile)}));
 	console.log(sourceFiles);
 
 	writeFile();
@@ -66,27 +67,50 @@ async function go () {
 }
 
 function onFileChange (eventType, filename) {
-	console.log(`change: ${filename} (${eventType})`);
 	if (pattern.test(filename)) {
 		update(filename);
 	};
 }
 
 function update (filename) {
+	const filePath = normalize(join(watchDir, filename));
+	const outputPath = normalize(outputFile);
+
+	if (filePath === outputPath) {
+		return; // ignore changes to the output file if it's in the watch directory.
+	}
+
+	console.log(`change: ${filename}`);
+	const {size} = sourceFiles;
+	const exists = isFile(filePath);
+
 	// if file exists and it isn't in sourceFiles, add it.
 	// if file doesn't exist and it's in sourceFiles, remove it.
-	// sourceFiles changed ? rewrite file : touch file
-	const {size} = sourceFiles;
-	const exists = isFile(join(watchDir, filename));
 	exists ? sourceFiles.add(filename) : sourceFiles.delete(filename);
+
+	// sourceFiles changed ? rewrite file : touch file
 	size !== sourceFiles.size ? writeFile() : touchFile();
 }
 
 function touchFile () {
 	console.log('touching');
 	touch(outputFile);
+	compileSass();
 	// console.warn('touchFile isn’t implemented. Rewriting file.');
 	// writeFile();
+}
+
+function compileSass () {
+	const {promises: fsp} = fs;
+
+	if (cssOutputFile) {
+		sass.render({file: outputFile, includePaths: [watchDir]}, (err, result) => {
+			checkError(err);
+			if (!err) {
+				writeFile.promise = fsp.writeFile(cssOutputFile, result.css, checkError)
+			}
+		});
+	}
 }
 
 const checkError = err => err ? console.error(err) : void 0;
@@ -102,13 +126,8 @@ async function writeFile () {
 		...Array.from(sourceFiles).map(f => `@import "${f}";`),
 		''
 	].join('\n');
-	console.log(string);
-	sass.render({data: string, includePaths: [watchDir]}, (err, result) => {
-		if (!err) {
-			writeFile.promise = fsp.writeFile(outputFile, result.css, checkError)
-		}
-	});
-	// writeFile.promise = fsp.writeFile(outputFile, string);
+
+	writeFile.promise = fsp.writeFile(outputFile, string).then(compileSass);
 }
 
 return go(process.argv[2], process.argv[3]);

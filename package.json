@@ -1,6 +1,6 @@
 {
   "name": "@raytheist/sasswatch",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "watches scss files and generates a file that imports them all.",
   "main": "index.js",
   "scripts": {

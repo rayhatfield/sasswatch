@@ -6,7 +6,9 @@ const fs = require('fs');
 const glob = require('glob');
 const prompt = require('prompt-async');
 const colors = require('colors');
-const sass = require('node-sass');
+const postcss = require('postcss');
+const postsass = require('@csstools/postcss-sass');
+const autoprefixer = require('autoprefixer');
 const touch = require('touch');
 
 const pattern = /\.scss$/i;
@@ -95,21 +97,31 @@ function update (filename) {
 function touchFile () {
 	console.log('touching');
 	touch(outputFile);
-	compileSass();
+	compile();
 	// console.warn('touchFile isn’t implemented. Rewriting file.');
 	// writeFile();
 }
 
-function compileSass () {
+async function compile () {
 	const {promises: fsp} = fs;
 
+	const sassOptions = {
+		includePaths: [watchDir]
+	};
+
 	if (cssOutputFile) {
-		sass.render({file: outputFile, includePaths: [watchDir]}, (err, result) => {
-			checkError(err);
-			if (!err) {
-				writeFile.promise = fsp.writeFile(cssOutputFile, result.css, checkError)
-			}
-		});
+		// console.log(autoprefixer().info());
+		const sass = await fsp.readFile(outputFile);
+		postcss([postsass(sassOptions), autoprefixer])
+			.process(sass, {
+				from: outputFile,
+				to: cssOutputFile
+			})
+			.then(result => {
+				fsp.writeFile(cssOutputFile, result.css, () => true);
+			}, error => {
+				console.log(error)
+			});
 	}
 }
 
@@ -120,14 +132,17 @@ async function writeFile () {
 	const previous = writeFile.promise || Promise.resolve();
 	await previous;
 	const string = [
-		'// This is a generated file. Changes will get stomped.',
-		`// source: ${watchDir}`,
-		`// ${new Date()}`,
+		'/*******************************************************',
+		' This is a generated file. Changes will get stomped.',
+		` source: ${watchDir}`,
+		` ${new Date()}`,
+		'*******************************************************/',
+		'',
 		...Array.from(sourceFiles).map(f => `@import "${f}";`),
 		''
 	].join('\n');
 
-	writeFile.promise = fsp.writeFile(outputFile, string).then(compileSass);
+	writeFile.promise = fsp.writeFile(outputFile, string).then(compile);
 }
 
 return go(process.argv[2], process.argv[3]);
